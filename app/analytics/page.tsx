@@ -1,29 +1,98 @@
-'use client';
-
 import { Header } from '@/components/header';
 import { KpiCards } from '@/components/kpi-cards';
 import { AnalyticsCharts } from '@/components/analytics-charts';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { dummyReports, categoryStats, trendData, departmentWorkload } from '@/lib/dummy-data';
+import { getSupabaseClient } from '@/lib/supabase';
+import { Report, CategoryStats, TrendData, DepartmentWorkload } from '@/lib/definitions';
 import { calculateMetrics } from '@/lib/report-utils';
 import { TrendingUp, TrendingDown, Clock, Target } from 'lucide-react';
 
-export default function AnalyticsPage() {
-  const metrics = calculateMetrics(dummyReports);
+export default async function AnalyticsPage() {
+  // fetch reports from db
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from('reports')
+    .select('*')
+    .order('created_at', { ascending: false });
+
+  const reports: Report[] = (data ?? []).map((r: any) => ({
+    id: r.id,
+    title: r.title,
+    category: r.category,
+    description: r.description,
+    location: { lat: r.lat, lng: r.lng },
+    address: r.address,
+    imageUrl: r.image_url,
+    status: r.status,
+    createdAt: r.created_at,
+    resolvedAt: r.resolved_at ?? undefined,
+    upvotes: r.upvotes,
+    priority: r.priority,
+    assignedTo: r.assigned_to ?? undefined,
+  }));
+
+  const metrics = calculateMetrics(reports);
 
   // calc additional insights
-  const totalReports = dummyReports.length;
-  const resolvedReports = dummyReports.filter(r => r.status === 'Resolved').length;
-  const resolutionRate = ((resolvedReports / totalReports) * 100).toFixed(1);
-  
-  const avgResolutionTime = departmentWorkload.reduce((sum, dept) => 
-    sum + dept.avgResolutionTime, 0) / departmentWorkload.length;
+  const totalReports = reports.length;
+  const resolvedReports = reports.filter(r => r.status === 'Resolved').length;
+  const resolutionRate = totalReports > 0 ? ((resolvedReports / totalReports) * 100).toFixed(1) : '0';
 
-  const topCategory = categoryStats.reduce((prev, current) => 
+  // calc category stats from live data
+  const categoryStats: CategoryStats[] = [
+    'Pothole', 'Streetlight Out', 'Waste Management',
+    'Water Logging', 'Broken Signage', 'Electrical Hazard'
+  ].map(category => {
+    const categoryReports = reports.filter(r => r.category === category);
+    return {
+      category: category as any,
+      count: categoryReports.filter(r => r.status !== 'Resolved').length,
+      resolved: categoryReports.filter(r => r.status === 'Resolved').length,
+    };
+  });
+
+  // calc trend data (last 7 days)
+  const trendData: TrendData[] = [];
+  const now = new Date();
+  for (let i = 6; i >= 0; i--) {
+    const date = new Date(now);
+    date.setDate(date.getDate() - i);
+    const dateStr = date.toISOString().split('T')[0];
+    const count = reports.filter(r =>
+      r.createdAt.startsWith(dateStr)
+    ).length;
+    trendData.push({ date: dateStr, count });
+  }
+
+  // calc department workload from live data
+  const departmentStats = [
+    'Public Works', 'Electrical', 'Sanitation', 'Traffic', 'Water Board'
+  ].map(dept => {
+    const deptReports = reports.filter(r => r.assignedTo === dept);
+    const resolvedDeptReports = deptReports.filter(r => r.resolvedAt);
+    const avgResolutionTime = resolvedDeptReports.length > 0
+      ? resolvedDeptReports.reduce((sum, r) => {
+          const created = new Date(r.createdAt);
+          const resolved = new Date(r.resolvedAt!);
+          return sum + (resolved.getTime() - created.getTime()) / (1000 * 60 * 60 * 24);
+        }, 0) / resolvedDeptReports.length
+      : 0;
+
+    return {
+      department: dept as any,
+      openIssues: deptReports.filter(r => r.status !== 'Resolved').length,
+      avgResolutionTime: Math.round(avgResolutionTime * 10) / 10,
+    };
+  });
+
+  const avgResolutionTime = departmentStats.reduce((sum, dept) =>
+    sum + dept.avgResolutionTime, 0) / departmentStats.length;
+
+  const topCategory = categoryStats.reduce((prev, current) =>
     prev.count > current.count ? prev : current);
 
-  const criticalIssues = dummyReports.filter(r => 
+  const criticalIssues = reports.filter(r =>
     r.priority === 5 && r.status !== 'Resolved').length;
 
   return (
@@ -94,10 +163,10 @@ export default function AnalyticsPage() {
           </div>
 
           {/* charts */}
-          <AnalyticsCharts 
+          <AnalyticsCharts
             categoryStats={categoryStats}
             trendData={trendData}
-            departmentWorkload={departmentWorkload}
+            departmentWorkload={departmentStats}
           />
 
           {/* detailed insights */}
@@ -109,7 +178,7 @@ export default function AnalyticsPage() {
               </CardHeader>
               <CardContent>
                 <div className="space-y-4">
-                  {departmentWorkload
+                  {departmentStats
                     .sort((a, b) => a.avgResolutionTime - b.avgResolutionTime)
                     .map((dept) => (
                       <div key={dept.department} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
@@ -183,7 +252,7 @@ export default function AnalyticsPage() {
                 <div className="p-4 bg-orange-50 border border-orange-200 rounded-lg">
                   <h4 className="font-medium text-orange-900 mb-2">⚡ Efficiency</h4>
                   <p className="text-sm text-orange-800">
-                    {departmentWorkload.find(d => d.avgResolutionTime > 5)?.department || 'Water Board'} department 
+                    {departmentStats.find(d => d.avgResolutionTime > 5)?.department || 'Water Board'} department
                     needs process optimization - slowest resolution times.
                   </p>
                 </div>

@@ -1,13 +1,13 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { Header } from '@/components/header';
 import { IssuesFilter } from '@/components/issues-filter';
 import { IssuesTable } from '@/components/issues-table';
 import { IssuesMap } from '@/components/issues-map';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { dummyReports } from '@/lib/dummy-data';
+import { Report } from '@/lib/definitions';
 import { filterReports, groupReports, findHotspots, FilterCriteria } from '@/lib/report-utils';
 import { MapPin, List, Target } from 'lucide-react';
 
@@ -15,32 +15,80 @@ export default function IssuesPage() {
   const [filters, setFilters] = useState<FilterCriteria>({});
   const [viewMode, setViewMode] = useState<'table' | 'map'>('table');
   const [showHotspots, setShowHotspots] = useState(false);
+  const [reports, setReports] = useState<Report[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // fetch reports on mount
+  useEffect(() => {
+    async function fetchReports() {
+      try {
+        const res = await fetch('/api/reports');
+        if (!res.ok) throw new Error('Failed to fetch reports');
+        const data: Report[] = await res.json();
+        setReports(data);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Unknown error');
+      } finally {
+        setLoading(false);
+      }
+    }
+    fetchReports();
+  }, []);
 
   // apply filters and grouping
   const filteredReports = useMemo(() => {
-    const filtered = filterReports(dummyReports, filters);
+    if (loading || error) return [];
+    const filtered = filterReports(reports, filters);
     return groupReports(filtered);
-  }, [filters]);
+  }, [reports, filters, loading, error]);
 
   // calc hotspots for current filters
   const hotspots = useMemo(() => {
-    if (!showHotspots) return [];
-    const filtered = filterReports(dummyReports, filters);
+    if (!showHotspots || loading || error) return [];
+    const filtered = filterReports(reports, filters);
     return findHotspots(filtered, filters.category);
-  }, [filters, showHotspots]);
+  }, [reports, filters, showHotspots, loading, error]);
 
   const handleShowHotspots = () => {
     setShowHotspots(true);
     setViewMode('map');
   };
 
+  if (loading) {
+    return (
+      <>
+        <Header title="All Issues" subtitle="Loading..." />
+        <main className="flex-1 flex items-center justify-center p-6">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
+            <p className="mt-4 text-gray-600">Loading reports...</p>
+          </div>
+        </main>
+      </>
+    );
+  }
+
+  if (error) {
+    return (
+      <>
+        <Header title="All Issues" subtitle="Error loading data" />
+        <main className="flex-1 flex items-center justify-center p-6">
+          <div className="text-center">
+            <p className="text-red-600">Error: {error}</p>
+          </div>
+        </main>
+      </>
+    );
+  }
+
   return (
     <>
-      <Header 
-        title="All Issues" 
+      <Header
+        title="All Issues"
         subtitle={`Managing ${filteredReports.length} civic complaints`}
       />
-      
+
       <main className="flex-1 overflow-auto p-6">
         <div className="space-y-6">
           {/* filters */}
@@ -104,7 +152,7 @@ export default function IssuesPage() {
           ) : (
             <div className="grid gap-6 lg:grid-cols-4">
               <div className="lg:col-span-3">
-                <IssuesMap reports={dummyReports} />
+                <IssuesMap reports={reports} />
               </div>
               
               {/* hotspots sidebar */}

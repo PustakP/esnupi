@@ -1,12 +1,36 @@
 import { Header } from '@/components/header';
 import { KpiCards } from '@/components/kpi-cards';
 import { IssuesMap } from '@/components/issues-map';
-import { dummyReports } from '@/lib/dummy-data';
 import { calculateMetrics } from '@/lib/report-utils';
+import { getSupabaseClient } from '@/lib/supabase';
+import { Report } from '@/lib/definitions';
 
-export default function Dashboard() {
-  // calc kpi metrics from dummy data
-  const metrics = calculateMetrics(dummyReports);
+export default async function Dashboard() {
+  // fetch reports from db (srv)
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from('reports')
+    .select('*')
+    .order('created_at', { ascending: false });
+
+  const reports: Report[] = (data ?? []).map((r: any) => ({
+    id: r.id,
+    title: r.title,
+    category: r.category,
+    description: r.description,
+    location: { lat: r.lat, lng: r.lng },
+    address: r.address,
+    imageUrl: r.image_url,
+    status: r.status,
+    createdAt: r.created_at,
+    resolvedAt: r.resolved_at ?? undefined,
+    upvotes: r.upvotes,
+    priority: r.priority,
+    assignedTo: r.assigned_to ?? undefined,
+  }));
+
+  // calc kpi metrics from live data
+  const metrics = calculateMetrics(reports);
 
   return (
     <>
@@ -22,13 +46,13 @@ export default function Dashboard() {
 
           {/* map and recent activity */}
           <div className="grid gap-6 lg:grid-cols-3">
-            <IssuesMap reports={dummyReports} />
+            <IssuesMap reports={reports} />
             
             {/* recent activity sidebar */}
             <div className="bg-white rounded-lg border p-6">
               <h3 className="text-lg font-semibold mb-4">Recent Activity</h3>
               <div className="space-y-4">
-                {dummyReports
+                {reports
                   .slice()
                   .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
                   .slice(0, 5)
