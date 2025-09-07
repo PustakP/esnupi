@@ -1,0 +1,6 @@
+[submodule "backend"]
+	path = backend
+	url = https://github.com/PustakP/esnupi_bck
+[submodule "esnupi_voicem"]
+	path = esnupi_voicem
+	url = https://github.com/PustakP/esnupi-voice
